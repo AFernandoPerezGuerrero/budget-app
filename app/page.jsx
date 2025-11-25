@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from 'react';
-import { Wallet, PieChart, Trash2, PlusCircle, RefreshCw, Moon, Sun, Zap, Calendar, CheckSquare, Square } from 'lucide-react';
+import { Wallet, PieChart, Trash2, PlusCircle, RefreshCw, Moon, Sun, Zap, Calendar, CheckSquare, Square, CloudLightning } from 'lucide-react';
 
 export default function Home() {
   // --- ESTADO ---
@@ -10,7 +10,7 @@ export default function Home() {
   const [category, setCategory] = useState('Comida');
   const [quincena, setQuincena] = useState('');
   
-  // Estado de Selección Múltiple
+  // Selección Múltiple
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
 
@@ -20,25 +20,7 @@ export default function Home() {
 
   const PRESPUESTO_LIMITE = 1600000; 
   const API_URL = process.env.NEXT_PUBLIC_SHEET_API;
-  
-  const CATEGORIES = ['Comida', 'Transporte', 'Servicios', 'Ocio', 'Arriendo', 'Varios', 'Deuda'];
-
-  // --- CONFIGURACIÓN DE GASTOS FIJOS (SEPARADOS) ---
-  const GASTOS_Q1 = [
-    { desc: 'Arriendo Q1', cat: 'Arriendo', amount: 450000 },
-    { desc: 'Comida Quincenal', cat: 'Comida', amount: 240000 },
-    { desc: 'Ahorro Servicios', cat: 'Servicios', amount: 150000 }, // Ejemplo basado en tu PDF
-    { desc: 'Internet Claro', cat: 'Servicios', amount: 55000 },
-    { desc: 'Pasajes', cat: 'Transporte', amount: 50000 }
-  ];
-
-  const GASTOS_Q2 = [
-    { desc: 'Arriendo Q2', cat: 'Arriendo', amount: 450000 },
-    { desc: 'Comida Quincenal', cat: 'Comida', amount: 240000 },
-    { desc: 'Servicios Básicos', cat: 'Servicios', amount: 55000 },
-    { desc: 'Plan Celular', cat: 'Servicios', amount: 27500 },
-    { desc: 'Pasajes', cat: 'Transporte', amount: 50000 }
-  ];
+  const CATEGORIES = ['Comida', 'Transporte', 'Servicios', 'Ocio', 'Arriendo', 'Varios', 'Deuda', 'Fijo'];
 
   // --- 1. LÓGICA DE FECHAS ---
   const getMonthName = (date) => date.toLocaleString('es-CO', { month: 'long' }).replace(/^\w/, c => c.toUpperCase());
@@ -57,14 +39,16 @@ export default function Home() {
     return options;
   }, []);
 
-  // --- 2. AUTODETECCIÓN Y CARGA ---
+  // --- 2. CARGA INICIAL ---
   useEffect(() => {
     if (API_URL) fetchExpenses();
+    
+    // Auto-detectar fecha
     const today = new Date();
     const day = today.getDate();
     let detectedQ = "";
     
-    // Lógica de Flujo de Caja (Gastas lo que te pagaron el 15 o el 30)
+    // Si estamos a fin de mes (30+), es Q2. Si es 15+, es Q1. Si es <15, es Q2 del mes anterior.
     if (day >= 30) {
       detectedQ = `${getMonthName(today)} ${today.getFullYear()} - Q2 (Día 30)`;
     } else if (day >= 15) {
@@ -109,6 +93,8 @@ export default function Home() {
   const w2Total = week2Expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
 
   // --- 4. ACCIONES ---
+  
+  // Función genérica para enviar datos
   const postToCloud = async (payload) => {
     await fetch(API_URL, {
       method: 'POST',
@@ -138,51 +124,69 @@ export default function Home() {
     setLoading(false);
   };
 
-  // --- LÓGICA CORREGIDA DEL RAYO ⚡ ---
-  const handleLoadDefaults = async () => {
-    // Detectamos si la quincena seleccionada es Q1 o Q2
-    const esQ1 = quincena.includes("Q1");
-    const listaAUsar = esQ1 ? GASTOS_Q1 : GASTOS_Q2;
-    const nombreQ = esQ1 ? "Q1 (Día 15)" : "Q2 (Día 30)";
+  // --- NUEVA LÓGICA DEL RAYO ⚡ (IMPORTAR DESDE TABLA VISUAL) ---
+  const handleImportFromSheet = async () => {
+    // Parseamos la quincena actual (Ej: "Noviembre 2025 - Q1 (Día 15)")
+    const parts = quincena.split(' '); // ["Noviembre", "2025", "-", "Q1", ...]
+    const month = parts[0];
+    const year = parts[1];
+    const qLabel = parts.find(p => p.startsWith("Q")); // "Q1" o "Q2"
 
-    if(!confirm(`¿Cargar gastos fijos de ${nombreQ}?`)) return; 
+    if(!confirm(`¿Importar gastos de ${month} ${qLabel} desde la hoja maestra?`)) return;
     
     setLoading(true);
-    const newItems = listaAUsar.map(gasto => ({
-      id: Date.now().toString() + Math.random(),
-      amount: gasto.amount,
-      description: gasto.desc,
-      category: gasto.cat,
-      quincena: quincena,
-      date: new Date().toISOString(),
-      action: 'add'
-    }));
     
-    setAllExpenses([...newItems, ...allExpenses]); 
-    for (const item of newItems) await postToCloud(item);
-    setLoading(false);
+    try {
+      // 1. Enviamos orden al Script
+      // Nota: No podemos hacer update optimista instantáneo porque no sabemos qué hay en el Excel
+      // así que mostramos "Cargando..."
+      
+      await fetch(API_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          action: 'importar_fijos',
+          month: month,     // Noviembre
+          year: year,       // 2025
+          quincena: qLabel, // Q1
+          fullQuincenaName: quincena
+        })
+      });
+
+      // 2. Esperamos un poco y recargamos todo para ver los nuevos datos
+      setTimeout(() => {
+        fetchExpenses();
+        setLoading(false);
+        alert("¡Gastos importados desde tu tabla!");
+      }, 2500);
+
+    } catch (e) {
+      alert("Error conectando con la hoja");
+      setLoading(false);
+    }
   };
 
+  // Borrar
   const handleDeleteOne = async (id) => {
     const backup = [...allExpenses];
     setAllExpenses(allExpenses.filter(i => i.id !== id));
     try { await postToCloud({ action: 'delete', id: id }); } catch (e) { setAllExpenses(backup); }
   };
 
-  const toggleSelection = (id) => {
-    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
-    else setSelectedIds([...selectedIds, id]);
-  };
-
   const handleBulkDelete = async () => {
     const backup = [...allExpenses];
     setAllExpenses(allExpenses.filter(i => !selectedIds.includes(i.id)));
     const idsToDelete = [...selectedIds];
-    setIsSelectMode(false);
-    setSelectedIds([]);
+    setIsSelectMode(false); setSelectedIds([]);
     try {
       for (const id of idsToDelete) await postToCloud({ action: 'delete', id: id });
     } catch (e) { setAllExpenses(backup); }
+  };
+
+  const toggleSelection = (id) => {
+    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
+    else setSelectedIds([...selectedIds, id]);
   };
 
   // --- UI ---
@@ -206,11 +210,8 @@ export default function Home() {
             </div>
           </div>
 
-          <select 
-            value={quincena} 
-            onChange={(e) => setQuincena(e.target.value)}
-            className="w-full bg-black/20 text-sm py-2 px-4 rounded-xl border border-white/10 outline-none mb-4 appearance-none text-center font-bold backdrop-blur-sm"
-          >
+          <select value={quincena} onChange={(e) => setQuincena(e.target.value)}
+            className="w-full bg-black/20 text-sm py-2 px-4 rounded-xl border border-white/10 outline-none mb-4 appearance-none text-center font-bold backdrop-blur-sm">
             {quincenaOptions.map(opt => <option key={opt} value={opt} className="text-black">{opt}</option>)}
           </select>
 
@@ -219,10 +220,7 @@ export default function Home() {
             <p className="text-4xl font-bold mt-1 tracking-tight">${totalSpent.toLocaleString()}</p>
           </div>
           <div className="mt-4 w-full bg-black/30 rounded-full h-2 overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ${totalSpent > PRESPUESTO_LIMITE ? 'bg-red-500' : 'bg-green-400'}`}
-              style={{ width: `${Math.min((totalSpent / PRESPUESTO_LIMITE) * 100, 100)}%` }}
-            ></div>
+            <div className={`h-full transition-all duration-500 ${totalSpent > PRESPUESTO_LIMITE ? 'bg-red-500' : 'bg-green-400'}`} style={{ width: `${Math.min((totalSpent / PRESPUESTO_LIMITE) * 100, 100)}%` }}></div>
           </div>
         </div>
 
@@ -239,19 +237,20 @@ export default function Home() {
               <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
                 {CATEGORIES.map(cat => (
                   <button key={cat} onClick={() => setCategory(cat)}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
-                      category === cat ? (darkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white') : (darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500')
-                    }`}>{cat}</button>
+                    className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${category === cat ? (darkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white') : (darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500')}`}>
+                    {cat}
+                  </button>
                 ))}
               </div>
               <div className="flex gap-2">
-                <button onClick={handleLoadDefaults} disabled={loading}
-                  className={`w-12 flex items-center justify-center rounded-xl transition-all ${darkMode ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-600'}`}>
-                  <Zap size={20} fill="currentColor" />
+                {/* BOTÓN DE IMPORTAR INTELIGENTE */}
+                <button onClick={handleImportFromSheet} disabled={loading}
+                  className={`w-12 flex items-center justify-center rounded-xl transition-all shadow-lg ${darkMode ? 'bg-yellow-600 text-white shadow-yellow-900/20' : 'bg-yellow-400 text-yellow-900 shadow-yellow-200'}`}>
+                  {loading ? <RefreshCw size={20} className="animate-spin" /> : <CloudLightning size={20} fill="currentColor" />}
                 </button>
                 <button onClick={handleSave} disabled={loading}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 active:scale-95 transition-all shadow-lg shadow-blue-500/30">
-                  {loading ? '...' : <><PlusCircle size={18} /> Agregar</>}
+                  <PlusCircle size={18} /> Agregar
                 </button>
               </div>
             </div>
@@ -274,7 +273,7 @@ export default function Home() {
           <div className="px-4 space-y-4 pb-20 mt-4">
             {!isSelectMode && (
               <>
-                <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-blue-50'}`}>
+                 <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-blue-50'}`}>
                   <h3 className={`text-xs font-bold uppercase mb-3 flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-blue-500'}`}>
                     <Calendar size={14} /> Ciclo {isQ1 ? '15-30' : '30-14'}
                   </h3>
@@ -295,6 +294,7 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+
                 <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'}`}>
                   <h3 className={`text-xs font-bold uppercase mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                     <PieChart size={14} /> Categorías
@@ -329,7 +329,7 @@ export default function Home() {
                 <div key={item.id} onClick={() => isSelectMode && toggleSelection(item.id)}
                   className={`group flex justify-between items-center p-3 rounded-xl border transition-colors cursor-pointer ${isSelectMode ? (selectedIds.includes(item.id) ? (darkMode ? 'bg-blue-900/20 border-blue-500' : 'bg-blue-50 border-blue-500') : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100')) : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100')}`}>
                   <div className="flex items-center gap-3">
-                    {isSelectMode ? (selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-500" /> : <Square size={20} className="text-gray-500" />) : (<div className={`w-1.5 h-8 rounded-full ${item.category === 'Comida' ? 'bg-orange-400' : 'bg-blue-400'}`}></div>)}
+                    {isSelectMode ? (selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-500" /> : <Square size={20} className="text-gray-500" />) : (<div className={`w-1.5 h-8 rounded-full ${item.category === 'Comida' ? 'bg-orange-400' : item.category === 'Fijo' ? 'bg-yellow-400' : 'bg-blue-400'}`}></div>)}
                     <div>
                       <p className={`font-bold text-sm ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{item.description}</p>
                       <p className="text-[10px] text-gray-500 uppercase font-bold">{item.category}</p>
@@ -337,9 +337,6 @@ export default function Home() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>${Number(item.amount).toLocaleString()}</span>
-                    {!isSelectMode && (
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteOne(item.id); }} className="text-gray-500 hover:text-red-500 p-2"><Trash2 size={16} /></button>
-                    )}
                   </div>
                 </div>
               ))}
