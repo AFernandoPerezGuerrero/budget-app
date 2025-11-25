@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from 'react';
-import { Wallet, PieChart, Trash2, PlusCircle, RefreshCw, Moon, Sun, Zap, Calendar, CheckCircle, XCircle, CheckSquare, Square } from 'lucide-react';
+import { Wallet, PieChart, Trash2, PlusCircle, RefreshCw, Moon, Sun, Zap, Calendar, CheckSquare, Square } from 'lucide-react';
 
 export default function Home() {
   // --- ESTADO ---
@@ -23,15 +23,24 @@ export default function Home() {
   
   const CATEGORIES = ['Comida', 'Transporte', 'Servicios', 'Ocio', 'Arriendo', 'Varios', 'Deuda'];
 
-  const GASTOS_FIJOS = [
-    { desc: 'Arriendo', cat: 'Arriendo', amount: 450000 },
-    { desc: 'Comida Mensual', cat: 'Comida', amount: 240000 },
-    { desc: 'Servicios', cat: 'Servicios', amount: 55000 },
-    { desc: 'Internet', cat: 'Servicios', amount: 27500 },
-    { desc: 'Pasajes', cat: 'Transporte', amount: 70000 }
+  // --- CONFIGURACIÓN DE GASTOS FIJOS (SEPARADOS) ---
+  const GASTOS_Q1 = [
+    { desc: 'Arriendo Q1', cat: 'Arriendo', amount: 450000 },
+    { desc: 'Comida Quincenal', cat: 'Comida', amount: 240000 },
+    { desc: 'Ahorro Servicios', cat: 'Servicios', amount: 150000 }, // Ejemplo basado en tu PDF
+    { desc: 'Internet Claro', cat: 'Servicios', amount: 55000 },
+    { desc: 'Pasajes', cat: 'Transporte', amount: 50000 }
   ];
 
-  // --- 1. LÓGICA DE FECHAS (FLUJO DE CAJA) ---
+  const GASTOS_Q2 = [
+    { desc: 'Arriendo Q2', cat: 'Arriendo', amount: 450000 },
+    { desc: 'Comida Quincenal', cat: 'Comida', amount: 240000 },
+    { desc: 'Servicios Básicos', cat: 'Servicios', amount: 55000 },
+    { desc: 'Plan Celular', cat: 'Servicios', amount: 27500 },
+    { desc: 'Pasajes', cat: 'Transporte', amount: 50000 }
+  ];
+
+  // --- 1. LÓGICA DE FECHAS ---
   const getMonthName = (date) => date.toLocaleString('es-CO', { month: 'long' }).replace(/^\w/, c => c.toUpperCase());
 
   const quincenaOptions = useMemo(() => {
@@ -55,6 +64,7 @@ export default function Home() {
     const day = today.getDate();
     let detectedQ = "";
     
+    // Lógica de Flujo de Caja (Gastas lo que te pagaron el 15 o el 30)
     if (day >= 30) {
       detectedQ = `${getMonthName(today)} ${today.getFullYear()} - Q2 (Día 30)`;
     } else if (day >= 15) {
@@ -98,8 +108,7 @@ export default function Home() {
   const w1Total = week1Expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
   const w2Total = week2Expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
 
-  // --- 4. ACCIONES (SIN ALERTAS) ---
-  
+  // --- 4. ACCIONES ---
   const postToCloud = async (payload) => {
     await fetch(API_URL, {
       method: 'POST',
@@ -129,11 +138,17 @@ export default function Home() {
     setLoading(false);
   };
 
+  // --- LÓGICA CORREGIDA DEL RAYO ⚡ ---
   const handleLoadDefaults = async () => {
-    // Solo dejamos confirmación aquí porque es una acción muy grande
-    if(!confirm(`¿Cargar gastos fijos?`)) return; 
+    // Detectamos si la quincena seleccionada es Q1 o Q2
+    const esQ1 = quincena.includes("Q1");
+    const listaAUsar = esQ1 ? GASTOS_Q1 : GASTOS_Q2;
+    const nombreQ = esQ1 ? "Q1 (Día 15)" : "Q2 (Día 30)";
+
+    if(!confirm(`¿Cargar gastos fijos de ${nombreQ}?`)) return; 
+    
     setLoading(true);
-    const newItems = GASTOS_FIJOS.map(gasto => ({
+    const newItems = listaAUsar.map(gasto => ({
       id: Date.now().toString() + Math.random(),
       amount: gasto.amount,
       description: gasto.desc,
@@ -148,40 +163,25 @@ export default function Home() {
     setLoading(false);
   };
 
-  // Borrado Individual (SIN ALERTA)
   const handleDeleteOne = async (id) => {
     const backup = [...allExpenses];
     setAllExpenses(allExpenses.filter(i => i.id !== id));
-    try {
-      await postToCloud({ action: 'delete', id: id });
-    } catch (e) { setAllExpenses(backup); }
+    try { await postToCloud({ action: 'delete', id: id }); } catch (e) { setAllExpenses(backup); }
   };
 
-  // Manejo de Selección
   const toggleSelection = (id) => {
-    if (selectedIds.includes(id)) {
-      setSelectedIds(selectedIds.filter(i => i !== id));
-    } else {
-      setSelectedIds([...selectedIds, id]);
-    }
+    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
+    else setSelectedIds([...selectedIds, id]);
   };
 
-  // Borrado Masivo (SIN ALERTA)
   const handleBulkDelete = async () => {
     const backup = [...allExpenses];
-    // Borramos visualmente todos los seleccionados
     setAllExpenses(allExpenses.filter(i => !selectedIds.includes(i.id)));
-    
-    // Salimos del modo selección
     const idsToDelete = [...selectedIds];
     setIsSelectMode(false);
     setSelectedIds([]);
-
-    // Enviamos a la nube uno por uno (Google Apps Script simple no soporta array de IDs aún)
     try {
-      for (const id of idsToDelete) {
-        await postToCloud({ action: 'delete', id: id });
-      }
+      for (const id of idsToDelete) await postToCloud({ action: 'delete', id: id });
     } catch (e) { setAllExpenses(backup); }
   };
 
@@ -218,7 +218,6 @@ export default function Home() {
             <p className="text-white/60 text-xs font-bold uppercase tracking-widest">Total Gastado</p>
             <p className="text-4xl font-bold mt-1 tracking-tight">${totalSpent.toLocaleString()}</p>
           </div>
-          
           <div className="mt-4 w-full bg-black/30 rounded-full h-2 overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${totalSpent > PRESPUESTO_LIMITE ? 'bg-red-500' : 'bg-green-400'}`}
@@ -229,36 +228,22 @@ export default function Home() {
 
         {/* CONTENIDO */}
         <div className={`flex-1 overflow-y-auto ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-          
-          {/* INPUTS (Solo visible si NO estamos en modo selección) */}
           {!isSelectMode && (
             <div className={`p-5 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'} rounded-b-3xl shadow-sm mb-4 border-b`}>
               <div className="flex gap-2 mb-3">
-                <input 
-                  type="number" placeholder="$0" value={amount} onChange={e => setAmount(e.target.value)}
-                  className={`w-1/3 p-3 rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'}`}
-                />
-                <input 
-                  type="text" placeholder="Descripción..." value={description} onChange={e => setDescription(e.target.value)}
-                  className={`w-2/3 p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'}`}
-                />
+                <input type="number" placeholder="$0" value={amount} onChange={e => setAmount(e.target.value)}
+                  className={`w-1/3 p-3 rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'}`} />
+                <input type="text" placeholder="Descripción..." value={description} onChange={e => setDescription(e.target.value)}
+                  className={`w-2/3 p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'}`} />
               </div>
-              
               <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
                 {CATEGORIES.map(cat => (
-                  <button
-                    key={cat} onClick={() => setCategory(cat)}
+                  <button key={cat} onClick={() => setCategory(cat)}
                     className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
-                      category === cat 
-                        ? (darkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white') 
-                        : (darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500')
-                    }`}
-                  >
-                    {cat}
-                  </button>
+                      category === cat ? (darkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white') : (darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500')
+                    }`}>{cat}</button>
                 ))}
               </div>
-
               <div className="flex gap-2">
                 <button onClick={handleLoadDefaults} disabled={loading}
                   className={`w-12 flex items-center justify-center rounded-xl transition-all ${darkMode ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-600'}`}>
@@ -272,34 +257,21 @@ export default function Home() {
             </div>
           )}
 
-          {/* BARRA DE ACCIÓN FLOTANTE (SOLO MODO SELECCIÓN) */}
           {isSelectMode && (
             <div className={`sticky top-0 z-10 p-4 shadow-md flex justify-between items-center ${darkMode ? 'bg-gray-800 border-b border-gray-700' : 'bg-white border-b border-gray-200'}`}>
-              <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                {selectedIds.length} seleccionados
-              </span>
+              <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{selectedIds.length} seleccionados</span>
               <div className="flex gap-2">
-                <button 
-                  onClick={() => { setIsSelectMode(false); setSelectedIds([]); }}
-                  className={`px-4 py-2 rounded-lg font-bold text-sm ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'}`}
-                >
-                  Cancelar
-                </button>
+                <button onClick={() => { setIsSelectMode(false); setSelectedIds([]); }}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'}`}>Cancelar</button>
                 {selectedIds.length > 0 && (
-                  <button 
-                    onClick={handleBulkDelete}
-                    className="px-4 py-2 rounded-lg font-bold text-sm bg-red-500 text-white shadow-lg shadow-red-500/30 active:scale-95 transition-transform"
-                  >
-                    Borrar
-                  </button>
+                  <button onClick={handleBulkDelete}
+                    className="px-4 py-2 rounded-lg font-bold text-sm bg-red-500 text-white shadow-lg shadow-red-500/30 active:scale-95 transition-transform">Borrar</button>
                 )}
               </div>
             </div>
           )}
 
           <div className="px-4 space-y-4 pb-20 mt-4">
-            
-            {/* GRÁFICAS (OCULTAS EN MODO SELECCIÓN PARA LIMPIEZA) */}
             {!isSelectMode && (
               <>
                 <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-blue-50'}`}>
@@ -323,7 +295,6 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-
                 <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'}`}>
                   <h3 className={`text-xs font-bold uppercase mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                     <PieChart size={14} /> Categorías
@@ -345,61 +316,29 @@ export default function Home() {
               </>
             )}
 
-            {/* HISTORIAL */}
             <div className="space-y-2">
               <div className="flex justify-between items-center mb-2">
                 <h3 className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>Historial</h3>
                 {!isSelectMode && currentExpenses.length > 0 && (
-                  <button 
-                    onClick={() => setIsSelectMode(true)}
-                    className={`text-xs font-bold px-3 py-1 rounded-full ${darkMode ? 'bg-gray-800 text-blue-400' : 'bg-blue-50 text-blue-600'}`}
-                  >
-                    Seleccionar
-                  </button>
+                  <button onClick={() => setIsSelectMode(true)}
+                    className={`text-xs font-bold px-3 py-1 rounded-full ${darkMode ? 'bg-gray-800 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>Seleccionar</button>
                 )}
               </div>
-
               {currentExpenses.length === 0 && <p className="text-center text-gray-500 text-sm py-4">Sin gastos</p>}
-              
               {currentExpenses.map((item) => (
-                <div 
-                  key={item.id} 
-                  onClick={() => isSelectMode && toggleSelection(item.id)}
-                  className={`group flex justify-between items-center p-3 rounded-xl border transition-colors cursor-pointer
-                    ${isSelectMode 
-                      ? (selectedIds.includes(item.id) 
-                          ? (darkMode ? 'bg-blue-900/20 border-blue-500' : 'bg-blue-50 border-blue-500') 
-                          : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'))
-                      : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100')
-                    }
-                  `}
-                >
+                <div key={item.id} onClick={() => isSelectMode && toggleSelection(item.id)}
+                  className={`group flex justify-between items-center p-3 rounded-xl border transition-colors cursor-pointer ${isSelectMode ? (selectedIds.includes(item.id) ? (darkMode ? 'bg-blue-900/20 border-blue-500' : 'bg-blue-50 border-blue-500') : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100')) : (darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100')}`}>
                   <div className="flex items-center gap-3">
-                    {/* ICONO IZQUIERDO: CHECKBOX o BARRA DE COLOR */}
-                    {isSelectMode ? (
-                      selectedIds.includes(item.id) 
-                        ? <CheckSquare size={20} className="text-blue-500" />
-                        : <Square size={20} className="text-gray-500" />
-                    ) : (
-                      <div className={`w-1.5 h-8 rounded-full ${item.category === 'Comida' ? 'bg-orange-400' : 'bg-blue-400'}`}></div>
-                    )}
-                    
+                    {isSelectMode ? (selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-500" /> : <Square size={20} className="text-gray-500" />) : (<div className={`w-1.5 h-8 rounded-full ${item.category === 'Comida' ? 'bg-orange-400' : 'bg-blue-400'}`}></div>)}
                     <div>
                       <p className={`font-bold text-sm ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{item.description}</p>
                       <p className="text-[10px] text-gray-500 uppercase font-bold">{item.category}</p>
                     </div>
                   </div>
-
                   <div className="flex items-center gap-2">
                     <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>${Number(item.amount).toLocaleString()}</span>
-                    {/* BOTÓN BASURA: SOLO VISIBLE SI NO ESTAMOS EN MODO SELECCIÓN */}
                     {!isSelectMode && (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); handleDeleteOne(item.id); }} 
-                        className="text-gray-500 hover:text-red-500 p-2"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteOne(item.id); }} className="text-gray-500 hover:text-red-500 p-2"><Trash2 size={16} /></button>
                     )}
                   </div>
                 </div>
